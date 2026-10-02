@@ -498,7 +498,8 @@ node --version
   meson install -C _build --tag runtime,devel
   # Emscripten requires linking to side modules to find the necessary symbols to export
   module_dir=$(printf '%s\n' $TARGET/lib/vips-modules-* | sort -n | tail -1)
-  [ -d "$module_dir" ] && modules=$(find $module_dir/ -type f -printf " %p") || true
+  # Sorted, so that the link order (and so the main module's bytes) does not depend on directory order
+  [ -d "$module_dir" ] && modules=$(find $module_dir/ -type f -printf " %p\n" | LC_ALL=C sort | tr -d '\n') || true
   sed -i "/^Libs:/ s/$/${modules//\//\\/}/" $TARGET/lib/pkgconfig/vips.pc
 )
 
