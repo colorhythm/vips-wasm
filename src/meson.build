@@ -77,11 +77,14 @@ endif
 # note 4: To ensure the testsuite passes, increase (main-)thread's stack size from 64 KiB to 256 KiB. This should be
 #         reasonable for image processing in Wasm, and given that libvips enforces a minimum thread stack size of 2 MiB
 #         on other POSIX platforms.
-# note 5: Build with `-sEMBIND_AOT` and `-sDYNAMIC_EXECUTION=0` so that the JS glue never evaluates a string as code
-#         (no `eval()` or `new Function()`), and runs under a Content Security Policy that allows 'wasm-unsafe-eval'
-#         but not 'unsafe-eval'. Embind's invokers are generated at link time rather than at startup, so bound calls
-#         keep their specialized code; emval's method callers become closures. The side modules carry no EM_ASM or
-#         EM_JS, so dynamic linking never reaches the eval sites that `-sDYNAMIC_EXECUTION=0` turns into aborts.
+# note 5: Build with `-sDYNAMIC_EXECUTION=0` so that the JS glue never evaluates a string as code (no `eval()` or
+#         `new Function()`), and runs under a Content Security Policy that allows 'wasm-unsafe-eval' but not
+#         'unsafe-eval'. Embind's invokers and emval's method callers become closures instead of code generated at
+#         startup. The side modules carry no EM_ASM or EM_JS, so dynamic linking never reaches the eval sites that
+#         this setting turns into aborts. `-sEMBIND_AOT` would keep specialized invokers, but its generation pass
+#         links libembind_gen.js, which has none of the embind additions this build relies on (the arithmetic
+#         vectors and `setAutoDeleteLater` from the Emscripten patches, `$ClassHandle` and `$deletionQueue` for
+#         vips-library.js).
 main_link_args = [
     '-sAUTOLOAD_DYLIBS=0',
     '-sABORTING_MALLOC=0',
@@ -101,7 +104,6 @@ main_link_args = [
     '-sINCOMING_MODULE_JS_API=@0@'.format(','.join(incoming_module_js_api)),
     '-sEXPORTED_RUNTIME_METHODS=FS,ENV,deletionQueue,addFunction,setAutoDeleteLater,setDelayFunction',
     '-sEXCEPTION_STACK_TRACES',
-    '-sEMBIND_AOT',
     '-sDYNAMIC_EXECUTION=0',
     '-sBINARYEN_EXTRA_PASSES=--emit-target-features',
 ]
