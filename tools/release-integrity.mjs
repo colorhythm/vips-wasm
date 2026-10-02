@@ -91,11 +91,25 @@ async function verifyPayloadFiles(root, manifest) {
 }
 
 function verifyManifest(manifest) {
-    assert.equal(manifest.schemaVersion, 1, "Unsupported integrity schema");
-    assert.equal(
-        manifest.package.version,
-        manifest.upstream.version,
-        "Colorhythm and upstream versions must match",
+    assert.equal(manifest.schemaVersion, 2, "Unsupported integrity schema");
+    const upstream = manifest.source?.upstream;
+    assert.equal(upstream?.name, "wasm-vips", "The upstream source must be wasm-vips");
+    assert.match(
+        upstream?.commit ?? "",
+        /^[0-9a-f]{40}$/,
+        "The upstream source commit must be a full SHA",
+    );
+    assert.match(
+        upstream?.version ?? "",
+        /^[0-9]+\.[0-9]+\.[0-9]+$/,
+        "The upstream source version must be a release",
+    );
+    assert.ok(
+        manifest.package.version.startsWith(`${upstream.version}-colorhythm.`)
+        && /^[1-9][0-9]*$/.test(
+            manifest.package.version.slice(`${upstream.version}-colorhythm.`.length),
+        ),
+        "Colorhythm builds are versioned <upstream version>-colorhythm.<build>",
     );
 }
 
@@ -173,17 +187,12 @@ export async function verifyPublishedDirectory(
     await verifyPayloadFiles(root, trustedManifest);
 }
 
-export async function verifyUpstreamDirectory(root, trustedManifest) {
+/**
+ * The build output in the repository (lib/, versions.json) and the notices
+ * beside it must be exactly the files whose hashes were reviewed and pinned
+ * in integrity.json from a CI build of the same source.
+ */
+export async function verifyBuildDirectory(root, trustedManifest) {
     verifyManifest(trustedManifest);
-    await verifyFileSet(root, [
-        ...Object.keys(trustedManifest.files),
-        "package.json",
-        "README.md",
-    ]);
-
-    const packageMetadata = await readJson(join(root, "package.json"));
-    assert.equal(packageMetadata.name, trustedManifest.upstream.name);
-    assert.equal(packageMetadata.version, trustedManifest.upstream.version);
-
     await verifyPayloadFiles(root, trustedManifest);
 }

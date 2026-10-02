@@ -3,9 +3,14 @@
 Colorhythm's npm distribution of [kleisauke/wasm-vips](
 https://github.com/kleisauke/wasm-vips).
 
-Published JavaScript and WebAssembly payloads are copied unchanged from the
-corresponding upstream npm release. The exported `integrity.json` records the
-upstream commit, archive integrity, and SHA-256 hash of every retained file.
+Colorhythm builds it from upstream's source with one difference: it is linked
+with `-sEMBIND_AOT -sDYNAMIC_EXECUTION=0`, so its JavaScript never evaluates a
+string as code (no `eval` or `new Function`). It therefore runs under a
+Content Security Policy whose `script-src` allows `'wasm-unsafe-eval'` but not
+`'unsafe-eval'`. Version `X.Y.Z-colorhythm.N` is build `N` of upstream
+release `X.Y.Z`. The exported `integrity.json` records the upstream source
+commit and the size and SHA-256 hash of every published file. See
+[RELEASING.md](RELEASING.md).
 
 [libvips](https://www.libvips.org/) for the browser and Node.js, compiled
 to WebAssembly with Emscripten.

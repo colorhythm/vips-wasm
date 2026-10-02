@@ -20,11 +20,15 @@ const manifest = {
     },
     package: {
         name: "@colorhythm/vips-wasm",
-        version: "0.0.0-test",
+        version: "0.0.0-colorhythm.1",
     },
-    schemaVersion: 1,
-    upstream: {
-        version: "0.0.0-test",
+    schemaVersion: 2,
+    source: {
+        upstream: {
+            commit: "0123456789abcdef0123456789abcdef01234567",
+            name: "wasm-vips",
+            version: "0.0.0",
+        },
     },
 };
 const packageMetadata = {
@@ -124,6 +128,25 @@ try {
     await assert.rejects(
         verifyPublishedDirectory(temporaryRoot, manifest, packageMetadata),
         /size does not match|SHA-256 does not match/,
+    );
+
+    for (const [version, message] of [
+        ["0.0.0", /versioned <upstream version>-colorhythm/],
+        ["0.0.1-colorhythm.1", /versioned <upstream version>-colorhythm/],
+        ["0.0.0-colorhythm.0", /versioned <upstream version>-colorhythm/],
+    ]) {
+        const mislabeled = { ...manifest, package: { ...manifest.package, version } };
+        await assert.rejects(
+            verifyPublishedDirectory(temporaryRoot, mislabeled, packageMetadata),
+            message,
+        );
+    }
+    await assert.rejects(
+        verifyPublishedDirectory(temporaryRoot, {
+            ...manifest,
+            source: { upstream: { ...manifest.source.upstream, commit: "main" } },
+        }, packageMetadata),
+        /upstream source commit must be a full SHA/,
     );
 
     await writeFile(join(temporaryRoot, "lib/payload.wasm"), bytes);

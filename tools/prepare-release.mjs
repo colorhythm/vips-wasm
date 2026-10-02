@@ -14,20 +14,24 @@ import {
     resolve,
 } from "node:path";
 import { fileURLToPath } from "node:url";
+import { findDynamicCode } from "./check-dynamic-code.mjs";
 import {
-    digest,
     readJson,
     sha256,
+    verifyBuildDirectory,
     verifyPublishedDirectory,
-    verifyUpstreamDirectory,
 } from "./release-integrity.mjs";
 
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const PACKAGE_METADATA_FILES = Object.freeze([
+    "integrity.json",
+    "package.json",
+    "README.md",
+]);
 
 function parseOptions(arguments_) {
     const options = {
         outputDirectory: resolve(process.cwd(), "release"),
-        upstreamTarball: null,
     };
 
     for (let index = 0; index < arguments_.length; index += 1) {
@@ -35,11 +39,6 @@ function parseOptions(arguments_) {
         const value = arguments_[index + 1];
         if (argument === "--output-directory" && value) {
             options.outputDirectory = resolve(process.cwd(), value);
-            index += 1;
-            continue;
-        }
-        if (argument === "--upstream-tarball" && value) {
-            options.upstreamTarball = resolve(process.cwd(), value);
             index += 1;
             continue;
         }
@@ -69,24 +68,6 @@ function parsePackResult(output) {
     return result[0];
 }
 
-async function verifyUpstreamTarball(path, manifest) {
-    assert.equal(
-        await digest(path, "sha1"),
-        manifest.upstream.shasum,
-        "Upstream tarball SHA-1 differs from npm metadata",
-    );
-    assert.equal(
-        await sha256(path),
-        manifest.upstream.tarballSha256,
-        "Upstream tarball SHA-256 differs from the trusted manifest",
-    );
-    assert.equal(
-        `sha512-${await digest(path, "sha512", "base64")}`,
-        manifest.upstream.integrity,
-        "Upstream tarball SRI differs from npm metadata",
-    );
-}
-
 async function main() {
     const options = parseOptions(process.argv.slice(2));
     const manifest = await readJson(join(REPOSITORY_ROOT, "integrity.json"));
@@ -102,52 +83,34 @@ async function main() {
         );
     }
 
+    // The source build must reproduce the reviewed bytes exactly, and those
+    // bytes must never evaluate a string as code.
+    await verifyBuildDirectory(REPOSITORY_ROOT, manifest);
+    const { findings } = await findDynamicCode(join(REPOSITORY_ROOT, "lib"));
+    assert.deepEqual(
+        findings.map(({ file, label, location }) => `${file}:${location} ${label}`),
+        [],
+        "The build evaluates strings as code",
+    );
+
     const temporaryRoot = await mkdtemp(join(tmpdir(), "vips-wasm-release-"));
     try {
         const cacheDirectory = join(temporaryRoot, "npm-cache");
-        const downloadDirectory = join(temporaryRoot, "download");
-        const extractDirectory = join(temporaryRoot, "upstream");
+        const packageDirectory = join(temporaryRoot, "package");
         await mkdir(cacheDirectory);
-        await mkdir(downloadDirectory);
-        await mkdir(extractDirectory);
+        await mkdir(join(packageDirectory, "lib"), { recursive: true });
         await mkdir(options.outputDirectory, { recursive: true });
 
-        let upstreamTarball = options.upstreamTarball;
-        if (!upstreamTarball) {
-            const packResult = parsePackResult(run("npm", [
-                "pack",
-                `${manifest.upstream.name}@${manifest.upstream.version}`,
-                "--cache",
-                cacheDirectory,
-                "--ignore-scripts",
-                "--json",
-                "--pack-destination",
-                downloadDirectory,
-            ]));
-            upstreamTarball = join(downloadDirectory, packResult.filename);
+        for (const file of [
+            ...Object.keys(manifest.files),
+            ...PACKAGE_METADATA_FILES,
+        ]) {
+            await copyFile(join(REPOSITORY_ROOT, file), join(packageDirectory, file));
         }
-
-        await verifyUpstreamTarball(upstreamTarball, manifest);
-        run("tar", ["-xzf", upstreamTarball, "-C", extractDirectory]);
-
-        const upstreamPackageDirectory = join(extractDirectory, "package");
-        await verifyUpstreamDirectory(upstreamPackageDirectory, manifest);
-        await copyFile(
-            join(REPOSITORY_ROOT, "integrity.json"),
-            join(upstreamPackageDirectory, "integrity.json"),
-        );
-        await copyFile(
-            join(REPOSITORY_ROOT, "package.json"),
-            join(upstreamPackageDirectory, "package.json"),
-        );
-        await copyFile(
-            join(REPOSITORY_ROOT, "README.md"),
-            join(upstreamPackageDirectory, "README.md"),
-        );
 
         const colorhythmPack = parsePackResult(run("npm", [
             "pack",
-            upstreamPackageDirectory,
+            packageDirectory,
             "--cache",
             cacheDirectory,
             "--ignore-scripts",
@@ -173,7 +136,7 @@ async function main() {
             filename: basename(colorhythmTarball),
             package: manifest.package.name,
             sha256: await sha256(colorhythmTarball),
-            upstreamSha256: manifest.upstream.tarballSha256,
+            upstreamCommit: manifest.source.upstream.commit,
             version: manifest.package.version,
         }, null, 4)}\n`);
     } finally {
