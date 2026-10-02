@@ -1,6 +1,6 @@
 {
   "name": "@colorhythm/vips-wasm",
-  "version": "0.0.19",
+  "version": "0.0.19-colorhythm.1",
   "description": "Colorhythm distribution of libvips for the browser and Node.js, compiled to WebAssembly with Emscripten",
   "homepage": "https://github.com/colorhythm/vips-wasm#readme",
   "bugs": {
