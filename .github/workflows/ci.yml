@@ -38,6 +38,15 @@ jobs:
         run: |
           docker build -t wasm-vips .
           docker run --rm -v ${{ github.workspace }}:/src wasm-vips
+      # The exact files a release would package, for review and for pinning
+      # their hashes in integrity.json before the release tag is pushed.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: vips-wasm-build
+          path: |
+            lib
+            versions.json
+          if-no-files-found: error
   CI:
     needs: build
     runs-on: ${{ matrix.os }}
