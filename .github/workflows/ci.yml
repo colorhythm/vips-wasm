@@ -119,6 +119,15 @@ jobs:
           echo "PACKAGE_NAME=$package_name" >> "$GITHUB_ENV"
           echo "PACKAGE_TARBALL=./release/colorhythm-vips-wasm-${package_version}.tgz" >> "$GITHUB_ENV"
           echo "PACKAGE_VERSION=$package_version" >> "$GITHUB_ENV"
+      # The package carries this run's build, which release:prepare holds to
+      # the pins in integrity.json.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            lib
+            versions.json
+          key: ${{ needs.build.outputs.cache-key }}
+          fail-on-cache-miss: true
       - name: Prepare verified package
         run: npm run release:prepare -- --output-directory release
       - name: Verify package
