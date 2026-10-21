@@ -16,7 +16,8 @@ var LibraryVips = {
         // are processed in-memory. This avoids spilling to temporary `/tmp` files via MEMFS (JS-based filesystem or
         // WasmFS), which would otherwise incur costly Wasm <-> JS crossings or internal filesystem abstractions
         // (virtual calls, bounds checks and buffer resizing).
-        ENV['VIPS_DISC_THRESHOLD'] = {{{ MAXIMUM_MEMORY }}};
+        // Keep the baseline spill threshold independent of the experimental heap ceiling.
+        ENV['VIPS_DISC_THRESHOLD'] = 2147483648;
 
         // Enforce a fixed thread pool by default on the web.
         ENV['VIPS_MAX_THREADS'] = {{{ PTHREAD_POOL_SIZE }}};

@@ -94,6 +94,7 @@ main_link_args = [
     '-sEXPORT_NAME=Vips',
     '-sEXIT_RUNTIME',
     '-sINITIAL_MEMORY=256MB',
+    '-sMAXIMUM_MEMORY=4294967296',
     '-sSTACK_SIZE=256KB',
     '-sALLOW_MEMORY_GROWTH',
     '-sGROWABLE_ARRAYBUFFERS',
