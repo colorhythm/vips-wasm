@@ -229,7 +229,7 @@ node --version
   curl -Ls https://github.com/libffi/libffi/releases/download/v$VERSION_FFI/libffi-$VERSION_FFI.tar.gz | tar xzC $DEPS/ffi --strip-components=1
   cd $DEPS/ffi
     # Keep libffi's handwritten wasm32 heap indices unsigned above 2 GiB.
-    printf '%s\n' '8bcb0ba0139390dd6a5ac5111dae9954f81c04c178e77e4c206928efa07a54a6  src/wasm/ffi.c' | sha256sum --check --quiet
+    printf '%s\n' '10e9472dd63fa153b95bf4fb37470200a17c6482e1f4397e1f88bf63c59420e7  src/wasm/ffi.c' | sha256sum --check --quiet
     patch --fuzz=0 -p1 < "$SOURCE_DIR/build/libffi-3.8.0-wasm32-unsigned-heap.patch"
   # Compile without -fexceptions
   sed -i 's/ -fexceptions//g' configure
