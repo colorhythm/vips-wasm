@@ -1,182 +1,52 @@
-name: CI
+name: Rotundus candidate artifact
 on:
-  push:
-    branches: [ '**' ]
-    tags: [ 'vips-wasm-v*.*.*' ]
-  pull_request:
-  workflow_dispatch:
-    inputs:
-      force-rebuild:
-        type: boolean
-        required: false
-        description: Force rebuild
-permissions: {}
+    push:
+        branches: ['codex/rotundus-4gib-candidate-20261021']
+    workflow_dispatch:
+permissions:
+    contents: read
 jobs:
-  build:
-    runs-on: ubuntu-26.04
-    outputs:
-      cache-key: ${{ steps.gen-cache-key.outputs.key }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - id: gen-cache-key
-        run: |
-          if [ "${{ inputs.force-rebuild }}" = true ]; then
-            key=$(date +%s)
-          else
-            key=${{ hashFiles('lib/**', 'src/**', 'build.sh', 'Dockerfile') }}
-          fi
-          echo "key=$key" >> $GITHUB_OUTPUT
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        id: cache
-        with:
-          path: |
-            lib
-            versions.json
-          key: ${{ steps.gen-cache-key.outputs.key }}
-      - name: Build
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          docker build -t wasm-vips .
-          docker run --rm -v ${{ github.workspace }}:/src wasm-vips
-      # The exact files a release would package, for review and for pinning
-      # their hashes in integrity.json before the release tag is pushed.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: vips-wasm-build
-          path: |
-            lib
-            versions.json
-          if-no-files-found: error
-  CI:
-    needs: build
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-26.04
-            nodejs_version: 22
-          - os: macos-15
-            nodejs_version: 22
-          - os: windows-2022
-            nodejs_version: 22
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: ${{ matrix.nodejs_version }}
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: |
-            lib
-            versions.json
-          key: ${{ needs.build.outputs.cache-key }}
-          enableCrossOsArchive: true
-          fail-on-cache-miss: true
-      - name: Install dependencies
-        run: npm install
-      - name: Install test dependencies
-        run: npm --prefix test/unit install
-      - name: Test
-        run: npm test
-  release:
-    if: github.ref_type == 'tag'
-    needs:
-      - build
-      - CI
-    env:
-      NPM_VERSION: 11.6.0
-    environment: npm
-    permissions:
-      contents: write
-      id-token: write
-    runs-on: ubuntu-26.04
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 24.8.0
-          package-manager-cache: false
-          registry-url: https://registry.npmjs.org/
-      - name: Check npm version
-        run: test "$(npm --version)" = "$NPM_VERSION"
-      - name: Resolve release metadata
-        run: |
-          package_name=$(node -p "require('./package.json').name")
-          package_version=$(node -p "require('./package.json').version")
-          manifest_name=$(node -p "require('./integrity.json').package.name")
-          manifest_version=$(node -p "require('./integrity.json').package.version")
-          if [ "$package_name" != "@colorhythm/vips-wasm" ] || [ "$manifest_name" != "$package_name" ]; then
-            echo "Release package name is not the reviewed scope" >&2
-            exit 1
-          fi
-          if [[ ! "$package_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || [ "$manifest_version" != "$package_version" ]; then
-            echo "Release package version is invalid or differs from integrity.json" >&2
-            exit 1
-          fi
-          echo "PACKAGE_NAME=$package_name" >> "$GITHUB_ENV"
-          echo "PACKAGE_TARBALL=./release/colorhythm-vips-wasm-${package_version}.tgz" >> "$GITHUB_ENV"
-          echo "PACKAGE_VERSION=$package_version" >> "$GITHUB_ENV"
-      # The package carries this run's build, which release:prepare holds to
-      # the pins in integrity.json.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: |
-            lib
-            versions.json
-          key: ${{ needs.build.outputs.cache-key }}
-          fail-on-cache-miss: true
-      - name: Prepare verified package
-        run: npm run release:prepare -- --output-directory release
-      - name: Verify package
-        run: npm run release:verify -- --package-tarball "$PACKAGE_TARBALL"
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 17.0.0
-          package-manager-cache: false
-      - name: Smoke-test exact package on minimum Node
-        run: node tools/smoke-release.mjs --package-tarball "$PACKAGE_TARBALL" --expected-node-version 17.0.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 24.8.0
-          package-manager-cache: false
-          registry-url: https://registry.npmjs.org/
-      - name: Check publish npm version
-        run: test "$(npm --version)" = "$NPM_VERSION"
-      - name: Publish package or verify existing release
-        run: |
-          set +e
-          view_output=$(npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version --json 2>&1)
-          view_status=$?
-          set -e
-
-          if [ "$view_status" -eq 0 ]; then
-            mkdir registry-release
-            npm pack "$PACKAGE_NAME@$PACKAGE_VERSION" --ignore-scripts --json --pack-destination registry-release > registry-release/pack.json
-            existing_filename=$(node -p "JSON.parse(require('fs').readFileSync('registry-release/pack.json', 'utf8'))[0].filename")
-            existing_tarball="registry-release/$existing_filename"
-            npm run release:verify -- --package-tarball "$existing_tarball"
-            # npm patch releases can produce different archive wrappers.
-            # release:verify checks the exact file set and every payload hash.
-            if cmp -s "$PACKAGE_TARBALL" "$existing_tarball"; then
-              echo "$PACKAGE_NAME@$PACKAGE_VERSION is already published with identical archive bytes"
-            else
-              echo "$PACKAGE_NAME@$PACKAGE_VERSION is already published with an identical verified payload"
-            fi
-          elif [[ "$view_output" == *"E404"* ]]; then
-            npm publish "$PACKAGE_TARBALL" --access public --provenance --tag next
-          else
-            echo "$view_output" >&2
-            exit "$view_status"
-          fi
-      - name: Create or repair GitHub release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "$PACKAGE_TARBALL" --clobber
-          else
-            gh release create "$GITHUB_REF_NAME" "$PACKAGE_TARBALL" --generate-notes --verify-tag
-          fi
+    candidate:
+        runs-on: ubuntu-26.04
+        timeout-minutes: 90
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+            - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+              with:
+                  node-version: 24.8.0
+                  package-manager-cache: false
+            - name: Record source and build toolchain
+              run: |
+                  mkdir -p candidate-evidence
+                  git rev-parse HEAD > candidate-evidence/source-commit.txt
+                  git diff 493ac2735e80bc74c409f1fb4d7f88360952a122 -- Dockerfile build.sh src package.json > candidate-evidence/configuration.patch
+                  docker build --progress=plain -t rotundus-vips-toolchain . 2>&1 | tee candidate-evidence/docker-build.log
+                  docker image inspect rotundus-vips-toolchain > candidate-evidence/toolchain-image.json
+            - name: Build all baseline targets
+              run: |
+                  docker run --rm -v "$GITHUB_WORKSPACE:/src" rotundus-vips-toolchain ./build.sh 2>&1 | tee candidate-evidence/candidate-build.log
+            - name: Prepare and verify the separate candidate archive
+              run: |
+                  python3 tools/prepare-candidate-integrity.py "$GITHUB_WORKSPACE" > candidate-evidence/integrity.json
+                  node tools/check-dynamic-code.mjs | tee candidate-evidence/dynamic-code.log
+                  env -u GITHUB_REF_NAME npm run release:prepare -- --output-directory release | tee candidate-evidence/package-prepare.log
+                  npm run release:verify -- --package-tarball release/colorhythm-vips-wasm-0.0.19-colorhythm.2026102101.tgz | tee candidate-evidence/package-verify.log
+                  node tools/smoke-release.mjs --package-tarball release/colorhythm-vips-wasm-0.0.19-colorhythm.2026102101.tgz --expected-node-version 24.8.0 | tee candidate-evidence/node-release-smoke.log
+                  sha256sum release/*.tgz > candidate-evidence/archive-sha256.txt
+            - name: Test upstream Node behavior without dynamic code generation
+              run: |
+                  npm --prefix test/unit install --ignore-scripts
+                  npm run test:node 2>&1 | tee candidate-evidence/upstream-node-tests.log
+            - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              if: always()
+              with:
+                  name: rotundus-vips-4gib-0.0.19-colorhythm.2026102101
+                  path: |
+                      candidate-evidence
+                      integrity.json
+                      lib
+                      package.json
+                      release
+                      versions.json
+                  if-no-files-found: error
+                  retention-days: 90
