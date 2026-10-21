@@ -11,7 +11,7 @@ baseline = json.loads(subprocess.check_output([
     "git", "show", f"{baseline_commit}:integrity.json"
 ], cwd=source, text=True))
 metadata = json.loads((source / "package.json").read_text())
-assert metadata["version"] == "0.0.19-colorhythm.2026102102"
+assert metadata["version"] == "0.0.19-colorhythm.2026102103"
 manifest = baseline.copy()
 manifest["package"] = {
     "name": metadata["name"],
@@ -26,11 +26,13 @@ manifest["source"]["colorhythmCandidate"] = {
     "browserDiscThresholdBytes": 2147483648,
     "dynamicExecution": False,
     "embindAot": False,
-    "libffiUnsignedWasm32HeapIndices": True,
-    "previousExperimentVersion": "0.0.19-colorhythm.2026102101",
+    "embindRefreshVectorHeapViews": True,
+    "embindUnsignedVectorHeapIndices": True,
     "initialMemoryBytes": 268435456,
+    "libffiUnsignedWasm32HeapIndices": True,
     "maximumMemoryBytes": 4294967296,
     "memoryGrowth": True,
+    "previousExperimentVersion": "0.0.19-colorhythm.2026102102",
     "purpose": "Isolated Rotundus ceiling experiment; no activation or publication",
 }
 manifest["files"] = {}

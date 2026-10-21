@@ -1,0 +1,387 @@
+From cc44dea433c5d5e2c58297ab8d4d8878d4979cea Mon Sep 17 00:00:00 2001
+From: Kleis Auke Wolthuizen <github@kleisauke.nl>
+Date: Fri, 10 Apr 2020 14:00:00 +0200
+Subject: [PATCH 1/3] Add `setAutoDeleteLater` function that calls
+ `deleteLater()` on construction
+
+---
+ src/lib/libembind.js | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/src/lib/libembind.js b/src/lib/libembind.js
+index d14f950295d05..4b34875e94461 100644
+--- a/src/lib/libembind.js
++++ b/src/lib/libembind.js
+@@ -1486,19 +1486,29 @@ var LibraryEmbind = {
+     }
+   },
+ 
++  $autoDeleteLater: false,
++
++  $setAutoDeleteLater__deps: ['$autoDeleteLater'],
++  $setAutoDeleteLater: (enable) => {
++    autoDeleteLater = enable;
++  },
++
+   $finalizationRegistry: false,
+ 
+   $detachFinalizer_deps: ['$finalizationRegistry'],
+   $detachFinalizer: (handle) => {},
+ 
+   $attachFinalizer__deps: [
+-    '$finalizationRegistry', '$detachFinalizer', '$releaseClassHandle',
++    '$autoDeleteLater', '$finalizationRegistry', '$detachFinalizer', '$releaseClassHandle',
+ #if ASSERTIONS
+     '$RegisteredPointer_fromWireType'
+ #endif
+   ],
+   $attachFinalizer: (handle) => {
+-    if (!globalThis.FinalizationRegistry) {
++    if (autoDeleteLater) {
++      attachFinalizer = (handle) => handle['deleteLater']();
++      return attachFinalizer(handle);
++    } else if (!globalThis.FinalizationRegistry) {
+       attachFinalizer = (handle) => handle;
+       return handle;
+     }
+
+From e13a24ad5b7ec45316e152bac6def1d0dc50d05d Mon Sep 17 00:00:00 2001
+From: Kleis Auke Wolthuizen <github@kleisauke.nl>
+Date: Fri, 31 Jul 2020 13:01:10 +0200
+Subject: [PATCH 2/3] Convert arithmetic vectors into JS arrays and vice versa
+
+---
+ src/lib/libembind.js             | 93 ++++++++++++++++++++++++++++++--
+ src/lib/libsigs.js               |  1 +
+ system/include/emscripten/bind.h | 21 +++++++-
+ system/include/emscripten/wire.h | 38 +++++++++++--
+ 4 files changed, 143 insertions(+), 10 deletions(-)
+
+diff --git a/src/lib/libembind.js b/src/lib/libembind.js
+index 4b34875e94461..ec9ef87e5712d 100644
+--- a/src/lib/libembind.js
++++ b/src/lib/libembind.js
+@@ -198,6 +198,36 @@ var LibraryEmbind = {
+     return sharedRegisterType(rawType, registeredInstance, options);
+   },
+ 
++  $getFloatHeap__deps: [],
++  $getFloatHeap: (name, width) => {
++    switch (width) {
++      case 4:
++        return HEAPF32;
++      case 8:
++        return HEAPF64;
++      default:
++        throw new TypeError(`invalid float width (${width}): ${name}`);
++    }
++  },
++
++  $getIntegerHeap__deps: [],
++  $getIntegerHeap: (name, width, signed) => {
++    switch (width) {
++      case 1:
++        return signed ? HEAP8 : HEAPU8;
++      case 2:
++        return signed ? HEAP16 : HEAPU16;
++      case 4:
++        return signed ? HEAP32 : HEAPU32;
++#if WASM_BIGINT
++      case 8:
++        return signed ? HEAP64 : HEAPU64;
++#endif
++      default:
++        throw new TypeError(`invalid integer width (${width}): ${name}`);
++    }
++  },
++
+   _embind_register_void__deps: ['$AsciiToString', '$registerType'],
+   _embind_register_void: (rawType, name) => {
+     name = AsciiToString(name);
+@@ -418,7 +448,7 @@ var LibraryEmbind = {
+ 
+   $readPointer__docs: '/** @suppress {globalThis} */',
+   $readPointer: function(pointer) {
+-    return this.fromWireType({{{ makeGetValue('pointer', '0', '*') }}});
++    return this.fromWireType({{{ makeGetValue('pointer', 0, '*') }}});
+   },
+ 
+   $installIndexedIterator: (proto, sizeMethodName, getMethodName) => {
+@@ -472,7 +502,7 @@ var LibraryEmbind = {
+       // For some method names we use string keys here since they are part of
+       // the public/external API and/or used by the runtime-generated code.
+       fromWireType(value) {
+-        var length = {{{ makeGetValue('value', '0', '*') }}};
++        var length = {{{ makeGetValue('value', 0, '*') }}};
+         var payload = value + {{{ POINTER_SIZE }}};
+ 
+         var str;
+@@ -510,7 +540,7 @@ var LibraryEmbind = {
+         // assumes POINTER_SIZE alignment
+         var base = _malloc({{{ POINTER_SIZE }}} + length + 1);
+         var ptr = base + {{{ POINTER_SIZE }}};
+-        {{{ makeSetValue('base', '0', 'length', SIZE_TYPE) }}};
++        {{{ makeSetValue('base', 0, 'length', SIZE_TYPE) }}};
+         if (valueIsOfTypeString) {
+           if (stdStringIsUTF8) {
+             stringToUTF8(value, ptr, length + 1);
+@@ -579,7 +609,7 @@ var LibraryEmbind = {
+         // assumes POINTER_SIZE alignment
+         var length = lengthBytesUTF(value);
+         var ptr = _malloc({{{ POINTER_SIZE }}} + length + charSize);
+-        {{{ makeSetValue('ptr', '0', 'length / charSize', SIZE_TYPE) }}};
++        {{{ makeSetValue('ptr', 0, 'length / charSize', SIZE_TYPE) }}};
+ 
+         encodeString(value, ptr + {{{ POINTER_SIZE }}}, length + charSize);
+ 
+@@ -614,6 +644,61 @@ var LibraryEmbind = {
+     registerType(rawOptionalType, EmValOptionalType);
+   },
+ 
++  _embind_register_arithmetic_vector__deps: [
++    '$AsciiToString', '$registerType', '$getFloatHeap', '$getIntegerHeap',
++    '$readPointer', '$throwBindingError'],
++  _embind_register_arithmetic_vector: (rawType, name, elementSize, isfloat, signed) => {
++    name = AsciiToString(name);
++    var getHeap = () => isfloat ?
++      getFloatHeap(name, elementSize) :
++      getIntegerHeap(name, elementSize, signed);
++    var shift = Math.log2(elementSize);
++
++    registerType(rawType, {
++      name: name,
++      fromWireType: (value) => {
++        var length = {{{ makeGetValue('value', 0, '*') }}};
++
++        var ptr = (value + Math.max({{{ POINTER_SIZE }}}, elementSize)) >>> shift;
++        var a = Array.from(getHeap().subarray(ptr, ptr + length));
++
++        _free(value);
++
++        return a;
++      },
++      toWireType: (destructors, value) => {
++        // We allow singular values as well
++        if (typeof value == 'number') {
++          value = [value];
++        }
++
++        if (!Array.isArray(value)) {
++          throwBindingError(`Cannot pass non-array to C++ vector type ${name}`);
++        }
++
++        // flatten 2D arrays
++        value = Array.prototype.concat.apply([], value);
++
++        var length = value.length;
++
++        var offset = Math.max({{{ POINTER_SIZE }}}, elementSize);
++        var base = _malloc(offset + length * elementSize);
++        var ptr = (base + offset) >>> shift;
++        {{{ makeSetValue('base', 0, 'length', SIZE_TYPE) }}};
++        getHeap().set(value, ptr);
++
++        if (destructors !== null) {
++          destructors.push(_free, base);
++        }
++        return base;
++      },
++      readValueFromPointer: readPointer,
++      destructorFunction(ptr) {
++        _free(ptr);
++      }
++    });
++  },
++
+   _embind_register_memory_view__deps: ['$AsciiToString', '$registerType'],
+   _embind_register_memory_view: (rawType, dataTypeIndex, name) => {
+     var typeMapping = [
+diff --git a/src/lib/libsigs.js b/src/lib/libsigs.js
+index 601f26850933a..4e17ec4e0c615 100644
+--- a/src/lib/libsigs.js
++++ b/src/lib/libsigs.js
+@@ -297,6 +297,7 @@ sigs = {
+   _embind_create_inheriting_constructor__sig: 'pppp',
+   _embind_finalize_value_array__sig: 'vp',
+   _embind_finalize_value_object__sig: 'vp',
++  _embind_register_arithmetic_vector__sig: 'vpppii',
+   _embind_register_bigint__sig: 'vpppjj',
+   _embind_register_bool__sig: 'vppii',
+   _embind_register_class__sig: 'vppppppppppppp',
+diff --git a/system/include/emscripten/bind.h b/system/include/emscripten/bind.h
+index e542668c606a0..2219ee49ae93e 100644
+--- a/system/include/emscripten/bind.h
++++ b/system/include/emscripten/bind.h
+@@ -88,6 +88,13 @@ void _embind_register_std_wstring(
+     size_t charSize,
+     const char* name);
+ 
++void _embind_register_arithmetic_vector(
++    TYPEID vectorType,
++    const char *name,
++    size_t elementSize,
++    bool isFloat,
++    bool isSigned);
++
+ void _embind_register_emval(
+     TYPEID emvalType);
+ 
+@@ -1912,7 +1919,8 @@ struct VectorAccess {
+ } // end namespace internal
+ 
+ template<typename T, class Allocator=std::allocator<T>>
+-class_<std::vector<T, Allocator>> register_vector(const char* name) {
++typename std::enable_if<!std::is_arithmetic<T>::value, class_<std::vector<T, Allocator>>>::type
++register_vector(const char* name) {
+     typedef std::vector<T, Allocator> VecType;
+     register_optional<T>();
+     using VectorElementType =
+@@ -1928,6 +1936,17 @@ class_<std::vector<T, Allocator>> register_vector(const char* name) {
+         .template iterable<VectorElementType>("size", "get");
+ }
+ 
++template<typename T>
++typename std::enable_if<std::is_arithmetic<T>::value, void>::type
++register_vector(const char* name) {
++    internal::_embind_register_arithmetic_vector(
++        internal::TypeID<std::vector<T>>::get(),
++        name,
++        sizeof(T),
++        std::is_floating_point<T>::value,
++        std::is_signed<T>::value);
++}
++
+ ////////////////////////////////////////////////////////////////////////////////
+ // MAPS
+ ////////////////////////////////////////////////////////////////////////////////
+diff --git a/system/include/emscripten/wire.h b/system/include/emscripten/wire.h
+index 18aec9c4408e5..5724505c7445d 100644
+--- a/system/include/emscripten/wire.h
++++ b/system/include/emscripten/wire.h
+@@ -22,6 +22,7 @@
+ #include <cstdlib>
+ #include <memory>
+ #include <string>
++#include <vector>
+ 
+ #define EMSCRIPTEN_ALWAYS_INLINE __attribute__((always_inline))
+ #define EMBIND_VISIBILITY_DEFAULT __attribute__((visibility("default")))
+@@ -326,17 +327,21 @@ struct BindingType<bool> {
+ };
+ 
+ template<typename T>
+-struct BindingType<std::basic_string<T>> {
++    struct BindingType<std::basic_string<T>,
++    typename std::enable_if<std::is_trivially_copyable<T>::value>::type> {
+     using String = std::basic_string<T>;
+-    static_assert(std::is_trivially_copyable<T>::value, "basic_string elements are memcpy'd");
+-    typedef struct {
++    struct StringStruct {
+         size_t length;
+         T data[1]; // trailing data
+-    }* WireType;
++    };
++    static_assert(offsetof(StringStruct, data) == sizeof(size_t),
++        "Unexpected padding");
++    using WireType = StringStruct *;
++
+     static WireType toWireType(const String& v, rvp::default_tag) {
+         WireType wt = (WireType)malloc(sizeof(size_t) + v.length() * sizeof(T));
+         wt->length = v.length();
+-        memcpy(wt->data, v.data(), v.length() * sizeof(T));
++        std::copy(v.begin(), v.end(), wt->data);
+         return wt;
+     }
+     static String fromWireType(WireType v) {
+@@ -344,6 +349,29 @@ struct BindingType<std::basic_string<T>> {
+     }
+ };
+ 
++template<typename T>
++struct BindingType<std::vector<T>,
++  typename std::enable_if<std::is_arithmetic<T>::value>::type> {
++    using Vector = std::vector<T>;
++    struct VectorStruct {
++        size_t length;
++        T data[1]; // trailing data
++    };
++    static_assert(offsetof(VectorStruct, data) == (sizeof(size_t) > sizeof(T) ? sizeof(size_t) : sizeof(T)),
++        "Unexpected padding");
++    using WireType = VectorStruct *;
++
++    static WireType toWireType(const Vector& v, rvp::default_tag) {
++        WireType wt = (WireType)malloc(offsetof(VectorStruct, data) + v.size() * sizeof(T));
++        wt->length = v.size();
++        std::copy(v.begin(), v.end(), wt->data);
++        return wt;
++    }
++    static Vector fromWireType(WireType v) {
++        return Vector(v->data, v->data + v->length);
++    }
++};
++
+ template<typename T>
+ struct BindingType<const T> : public BindingType<T> {
+ };
+
+From d1aa1ceae8408311868149e0971473bd3e2eafab Mon Sep 17 00:00:00 2001
+From: Kleis Auke Wolthuizen <github@kleisauke.nl>
+Date: Sun, 28 Aug 2022 11:36:28 +0200
+Subject: [PATCH 3/3] Add `_emscripten_get_dynamic_libraries_js` helper
+
+Handy for determining which dynamic libraries are loaded in native code.
+---
+ src/lib/libdylink.js                  | 13 +++++++++++++
+ src/lib/libsigs.js                    |  1 +
+ system/lib/libc/emscripten_internal.h |  2 ++
+ 3 files changed, 16 insertions(+)
+
+diff --git a/src/lib/libdylink.js b/src/lib/libdylink.js
+index 56f33037da678..d8c04bc987f8e 100644
+--- a/src/lib/libdylink.js
++++ b/src/lib/libdylink.js
+@@ -1256,6 +1256,19 @@ var LibraryDylink = {
+ #endif
+   },
+ 
++  _emscripten_get_dynamic_libraries_js__deps: ['malloc', '$stringToNewUTF8'],
++  _emscripten_get_dynamic_libraries_js: function() {
++    var size = (dynamicLibraries.length + 1) * {{{ POINTER_SIZE }}};
++    var libs = _malloc(size);
++    var libs_ptr = libs;
++    dynamicLibraries.forEach((lib) => {
++      {{{ makeSetValue('libs_ptr', 0, 'stringToNewUTF8(lib)', '*') }}};
++      libs_ptr += {{{ POINTER_SIZE }}};
++    });
++    {{{ makeSetValue('libs_ptr', 0, 0, '*') }}};
++    return libs;
++  },
++
+   // void* dlopen(const char* filename, int flags);
+   $dlopenInternal__deps: ['$dlSetError', '$PATH'],
+   $dlopenInternal: (handle, jsflags) => {
+diff --git a/src/lib/libsigs.js b/src/lib/libsigs.js
+index 4e17ec4e0c615..ffbe97ffb8ea6 100644
+--- a/src/lib/libsigs.js
++++ b/src/lib/libsigs.js
+@@ -334,6 +334,7 @@ sigs = {
+   _emscripten_fetch_get_response_headers__sig: 'pipp',
+   _emscripten_fetch_get_response_headers_length__sig: 'pi',
+   _emscripten_fs_load_embedded_files__sig: 'vp',
++  _emscripten_get_dynamic_libraries_js__sig: 'p',
+   _emscripten_get_last_devicemotion_event__sig: 'p',
+   _emscripten_get_last_deviceorientation_event__sig: 'p',
+   _emscripten_get_last_mouse_event__sig: 'p',
+diff --git a/system/lib/libc/emscripten_internal.h b/system/lib/libc/emscripten_internal.h
+index 12d0b300fb21d..26eb8b0171119 100644
+--- a/system/lib/libc/emscripten_internal.h
++++ b/system/lib/libc/emscripten_internal.h
+@@ -83,6 +83,8 @@ int _munmap_js(
+ int _msync_js(
+   void* addr, size_t length, int prot, int flags, int fd, off_t offset);
+ 
++char** _emscripten_get_dynamic_libraries_js(void);
++
+ struct dso;
+ 
+ typedef void (*dlopen_callback_func)(struct dso*, void* user_data);

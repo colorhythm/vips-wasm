@@ -20,9 +20,10 @@ RUN \
     && \
   pipx install meson
 
-# Emscripten patches
+# Preserve the recorded baseline patch, with unsigned arithmetic-vector addresses.
+COPY build/emscripten-6.0.10-unsigned-vectors.patch /tmp/emscripten.patch
 RUN \
-  curl -Ls https://github.com/emscripten-core/emscripten/compare/6.0.10...kleisauke:wasm-vips-6.0.10.patch | patch -p1 -d $EMSDK/upstream/emscripten && \
+  patch --fuzz=0 -p1 -d $EMSDK/upstream/emscripten < /tmp/emscripten.patch && \
   emcc --clear-cache && embuilder build sysroot --force
 
 # Rust
