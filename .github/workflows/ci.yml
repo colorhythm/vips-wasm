@@ -5,6 +5,9 @@ on:
     workflow_dispatch:
 permissions:
     contents: read
+defaults:
+    run:
+        shell: bash
 jobs:
     candidate:
         runs-on: ubuntu-26.04
@@ -21,7 +24,7 @@ jobs:
               run: |
                   mkdir -p candidate-evidence
                   git rev-parse HEAD > candidate-evidence/source-commit.txt
-                  git diff 493ac2735e80bc74c409f1fb4d7f88360952a122 -- Dockerfile build.sh src package.json > candidate-evidence/configuration.patch
+                  git diff 493ac2735e80bc74c409f1fb4d7f88360952a122 -- Dockerfile build.sh build src package.json tools .github/workflows/ci.yml > candidate-evidence/configuration.patch
                   docker build --progress=plain -t rotundus-vips-toolchain . 2>&1 | tee candidate-evidence/docker-build.log
                   docker image inspect rotundus-vips-toolchain > candidate-evidence/toolchain-image.json
             - name: Build all baseline targets
@@ -32,9 +35,14 @@ jobs:
                   python3 tools/prepare-candidate-integrity.py "$GITHUB_WORKSPACE" > candidate-evidence/integrity.json
                   node tools/check-dynamic-code.mjs | tee candidate-evidence/dynamic-code.log
                   env -u GITHUB_REF_NAME npm run release:prepare -- --output-directory release | tee candidate-evidence/package-prepare.log
-                  npm run release:verify -- --package-tarball release/colorhythm-vips-wasm-0.0.19-colorhythm.2026102101.tgz | tee candidate-evidence/package-verify.log
-                  node tools/smoke-release.mjs --package-tarball release/colorhythm-vips-wasm-0.0.19-colorhythm.2026102101.tgz --expected-node-version 24.8.0 | tee candidate-evidence/node-release-smoke.log
+                  npm run release:verify -- --package-tarball release/colorhythm-vips-wasm-0.0.19-colorhythm.2026102102.tgz | tee candidate-evidence/package-verify.log
+                  node tools/smoke-release.mjs --package-tarball release/colorhythm-vips-wasm-0.0.19-colorhythm.2026102102.tgz --expected-node-version 24.8.0 | tee candidate-evidence/node-release-smoke.log
                   sha256sum release/*.tgz > candidate-evidence/archive-sha256.txt
+            - name: Test high-address FFI on the exact packaged candidate
+              run: |
+                  mkdir candidate-test-package
+                  tar -xzf release/colorhythm-vips-wasm-0.0.19-colorhythm.2026102102.tgz -C candidate-test-package
+                  node tools/check-ffi-high-address.mjs "$GITHUB_WORKSPACE/candidate-test-package/package" "$GITHUB_WORKSPACE/candidate-evidence/ffi-high-address.json"
             - name: Test upstream Node behavior without dynamic code generation
               run: |
                   npm --prefix test/unit install --ignore-scripts
@@ -42,7 +50,7 @@ jobs:
             - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               if: always()
               with:
-                  name: rotundus-vips-4gib-0.0.19-colorhythm.2026102101
+                  name: rotundus-vips-4gib-0.0.19-colorhythm.2026102102
                   path: |
                       candidate-evidence
                       integrity.json
