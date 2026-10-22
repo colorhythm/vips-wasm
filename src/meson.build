@@ -88,8 +88,7 @@ endif
 main_link_args = [
     '-sAUTOLOAD_DYLIBS=0',
     '-sABORTING_MALLOC=0',
-    # Note: mimalloc is incompatible with AddressSanitizer
-    '-sMALLOC=mimalloc',
+    '-sMALLOC=dlmalloc',
     '-sMODULARIZE',
     '-sEXPORT_NAME=Vips',
     '-sEXIT_RUNTIME',

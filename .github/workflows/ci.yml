@@ -1,7 +1,7 @@
-name: Rotundus candidate artifact
+name: Rotundus dlmalloc feasibility artifact
 on:
     push:
-        branches: ['codex/rotundus-4gib-candidate-20261021']
+        branches: ['codex/rotundus-dlmalloc-probe-20261021']
     workflow_dispatch:
 permissions:
     contents: read
@@ -30,18 +30,22 @@ jobs:
             - name: Build all baseline targets
               run: |
                   docker run --rm -v "$GITHUB_WORKSPACE:/src" rotundus-vips-toolchain ./build.sh 2>&1 | tee candidate-evidence/candidate-build.log
+            - name: Check threaded dlmalloc exact single allocation
+              run: |
+                  docker run --rm -v "$GITHUB_WORKSPACE:/src" rotundus-vips-toolchain -c 'emcc tools/check-dlmalloc-large-allocation.c -O2 -pthread -sPTHREAD_POOL_SIZE=2 -sMALLOC=dlmalloc -sINITIAL_MEMORY=268435456 -sMAXIMUM_MEMORY=4294967296 -sALLOW_MEMORY_GROWTH -sDYNAMIC_EXECUTION=0 -sEXIT_RUNTIME=1 -sENVIRONMENT=node -o candidate-evidence/dlmalloc-large-allocation.js' 2>&1 | tee candidate-evidence/dlmalloc-allocation-build.log
+                  node --disallow-code-generation-from-strings candidate-evidence/dlmalloc-large-allocation.js | tee candidate-evidence/dlmalloc-large-allocation.json
             - name: Prepare and verify the separate candidate archive
               run: |
                   python3 tools/prepare-candidate-integrity.py "$GITHUB_WORKSPACE" > candidate-evidence/integrity.json
                   node tools/check-dynamic-code.mjs | tee candidate-evidence/dynamic-code.log
                   env -u GITHUB_REF_NAME npm run release:prepare -- --output-directory release | tee candidate-evidence/package-prepare.log
-                  npm run release:verify -- --package-tarball release/colorhythm-vips-wasm-0.0.19-colorhythm.2026102103.tgz | tee candidate-evidence/package-verify.log
-                  node tools/smoke-release.mjs --package-tarball release/colorhythm-vips-wasm-0.0.19-colorhythm.2026102103.tgz --expected-node-version 24.8.0 | tee candidate-evidence/node-release-smoke.log
+                  npm run release:verify -- --package-tarball release/colorhythm-vips-wasm-0.0.19-colorhythm.2026102104.tgz | tee candidate-evidence/package-verify.log
+                  node tools/smoke-release.mjs --package-tarball release/colorhythm-vips-wasm-0.0.19-colorhythm.2026102104.tgz --expected-node-version 24.8.0 | tee candidate-evidence/node-release-smoke.log
                   sha256sum release/*.tgz > candidate-evidence/archive-sha256.txt
             - name: Test high-address FFI on the exact packaged candidate
               run: |
                   mkdir candidate-test-package
-                  tar -xzf release/colorhythm-vips-wasm-0.0.19-colorhythm.2026102103.tgz -C candidate-test-package
+                  tar -xzf release/colorhythm-vips-wasm-0.0.19-colorhythm.2026102104.tgz -C candidate-test-package
                   node tools/check-ffi-high-address.mjs "$GITHUB_WORKSPACE/candidate-test-package/package" "$GITHUB_WORKSPACE/candidate-evidence/ffi-high-address.json"
             - name: Test upstream Node behavior without dynamic code generation
               run: |
@@ -50,7 +54,7 @@ jobs:
             - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               if: always()
               with:
-                  name: rotundus-vips-4gib-0.0.19-colorhythm.2026102103
+                  name: rotundus-dlmalloc-feasibility-0.0.19-colorhythm.2026102104
                   path: |
                       candidate-evidence
                       integrity.json

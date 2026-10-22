@@ -11,7 +11,7 @@ baseline = json.loads(subprocess.check_output([
     "git", "show", f"{baseline_commit}:integrity.json"
 ], cwd=source, text=True))
 metadata = json.loads((source / "package.json").read_text())
-assert metadata["version"] == "0.0.19-colorhythm.2026102103"
+assert metadata["version"] == "0.0.19-colorhythm.2026102104"
 manifest = baseline.copy()
 manifest["package"] = {
     "name": metadata["name"],
@@ -19,6 +19,7 @@ manifest["package"] = {
 }
 manifest["source"] = dict(baseline["source"])
 manifest["source"]["colorhythmCandidate"] = {
+    "allocator": "dlmalloc",
     "baseCommit": baseline_commit,
     "buildCommit": subprocess.check_output([
         "git", "rev-parse", "HEAD"
@@ -32,8 +33,8 @@ manifest["source"]["colorhythmCandidate"] = {
     "libffiUnsignedWasm32HeapIndices": True,
     "maximumMemoryBytes": 4294967296,
     "memoryGrowth": True,
-    "previousExperimentVersion": "0.0.19-colorhythm.2026102102",
-    "purpose": "Isolated Rotundus ceiling experiment; no activation or publication",
+    "previousExperimentVersion": "0.0.19-colorhythm.2026102103",
+    "purpose": "Isolated dlmalloc allocator feasibility experiment; not release evidence; no activation or publication",
 }
 manifest["files"] = {}
 for name in sorted(baseline["files"]):
